@@ -1,0 +1,219 @@
+---
+title: "MINI PROJECT 1"
+author: "CHEICK AMED DIALLO"
+date: "2024-09-25"
+---
+
+### Data Loading and Preparation
+
+In this section, I load all the necessary libraries, download the data to my computer, and read it into R for analysis.
+
+### Loading the necessary libraries
+
+```{r}
+if (!require("tidyverse")) install.packages("tidyverse")
+if (!require("readxl")) install.packages("readxl")
+if (!require("lubridate")) install.packages("lubridate")
+if (!require("DT")) install.packages("DT")
+library(tidyverse)
+library(readxl)
+library(lubridate)
+library(DT)
+```
+
+### Download Fare Revenue data
+
+```{r}
+
+if (!file.exists("2022_fare_revenue.xlsx")) {
+  download.file("http://www.transit.dot.gov/sites/fta.dot.gov/files/2024-04/2022%20Fare%20Revenue.xlsx", 
+                destfile = "2022_fare_revenue.xlsx", 
+                quiet = FALSE, 
+                method = "wget")
+}
+FARES <- read_xlsx("2022_fare_revenue.xlsx") %>%
+  select(-`State/Parent NTD ID`, -`Reporter Type`, -`Reporting Module`, -`TOS`, 
+         -`Passenger Paid Fares`, -`Organization Paid Fares`) %>%
+  filter(`Expense Type` == "Funds Earned During Period") %>%
+  select(-`Expense Type`)
+```
+### Download Expenses data
+
+```{r}
+if (!file.exists("2022_expenses.csv")) {
+  download.file("https://data.transportation.gov/api/views/dkxx-zjd6/rows.csv?date=20231102&accessType=DOWNLOAD&bom=true&format=true", 
+                destfile = "2022_expenses.csv", 
+                quiet = FALSE, 
+                method = "wget")
+}
+EXPENSES <- read_csv("2022_expenses.csv") %>%
+  select(`NTD ID`, `Agency`, `Total`, `Mode`) %>%
+  mutate(`NTD ID` = as.integer(`NTD ID`)) %>%
+  rename(Expenses = Total) %>%
+  group_by(`NTD ID`, `Mode`) %>%
+  summarize(Expenses = sum(Expenses, na.rm = TRUE)) %>%
+  ungroup()
+```
+
+### Combine FARES and EXPENSES datasets
+
+```{r}
+FINANCIALS <- inner_join(FARES, EXPENSES, by = c("NTD ID", "Mode"))
+```
+
+### Download Monthly Transit Numbers (Ridership)
+```{r}
+if (!file.exists("ridership.xlsx")) {
+  download.file("https://www.transit.dot.gov/sites/fta.dot.gov/files/2024-09/July%202024%20Complete%20Monthly%20Ridership%20%28with%20adjustments%20and%20estimates%29_240903.xlsx", 
+                destfile = "ridership.xlsx", 
+                quiet = FALSE, 
+                method = "wget")
+}
+```
+
+### Prepare Trips (UPT) Data
+
+```{r}
+TRIPS <- read_xlsx("ridership.xlsx", sheet = "UPT") %>%
+  filter(`Mode/Type of Service Status` == "Active") %>%
+  select(-`Legacy NTD ID`, -`Reporter Type`, -`Mode/Type of Service Status`, -`UACE CD`, -`TOS`) %>%
+  pivot_longer(-c(`NTD ID`:`3 Mode`), names_to = "month", values_to = "UPT") %>%
+  drop_na()
+```
+
+### Prepare Mileage (VRM) Data
+
+```{r}
+MILES <- read_xlsx("ridership.xlsx", sheet = "VRM") %>%
+  filter(`Mode/Type of Service Status` == "Active") %>%
+  select(-`Legacy NTD ID`, -`Reporter Type`, -`Mode/Type of Service Status`, -`UACE CD`, -`TOS`) %>%
+  pivot_longer(-c(`NTD ID`:`3 Mode`), names_to = "month", values_to = "VRM") %>%
+  drop_na() %>%
+  group_by(`NTD ID`, `Agency`, `UZA Name`, `Mode`, `3 Mode`, month) %>%
+  summarize(VRM = sum(VRM, na.rm = TRUE)) %>%
+  ungroup()
+```
+
+### Combine TRIPS and MILES into a single dataset
+
+```{r}
+USAGE <- inner_join(TRIPS, MILES) %>%
+  rename(metro_area = `UZA Name`) %>%
+  mutate(`NTD ID` = as.integer(`NTD ID`)) %>%
+  mutate(Mode = case_when(
+    Mode == "DR" ~ "Demand Response",
+    Mode == "MB" ~ "Motorbus",
+    Mode == "CR" ~ "Commuter Rail",
+    Mode == "CC" ~ "Cable Car",
+    Mode == "LR" ~ "Light Rail",
+    Mode == "PB" ~ "Publico",
+    Mode == "SR" ~ "Streetcar Rail",
+    Mode == "VP" ~ "Vanpool",     
+    Mode == "CB" ~ "Commuter Bus",
+    Mode == "TB" ~ "Trolleybus",
+    Mode == "FB" ~ "Ferryboat",
+    Mode == "TR" ~ "Aerial Tramway",
+    Mode == "HR" ~ "Heavy Rail",
+    Mode == "MG" ~ "Monorail/Automated Guideway",
+    Mode == "RB" ~ "Bus Rapid Transit",
+    Mode == "OR" ~ "Other Rail",
+    Mode == "YR" ~ "Hybrid Rail",
+    Mode == "AR" ~ "Alaska Railroad",
+    Mode == "IP" ~ "Inclined Plane",
+    TRUE ~ "Unknown"))
+```
+
+### Display random sample of 1000 rows from USAGE
+
+```{r}
+sample_n(USAGE, 1000) %>%
+  mutate(month = as.character(month)) %>%
+  select(-`NTD ID`, -`3 Mode`) %>%
+  DT::datatable()
+```
+
+### Find the transit agency with the most total VRM
+
+```{r}
+max_VRM_agency <- USAGE %>%
+  group_by(Agency) %>%
+  summarize(Total_VRM = sum(VRM, na.rm = TRUE)) %>%
+  filter(Total_VRM == max(Total_VRM, na.rm = TRUE))
+print(max_VRM_agency)
+```
+
+### Number of trips on the NYC Subway in May 2024
+
+```{r}
+nyc_subway_may_2024 <- USAGE %>%
+  filter(Mode == "Heavy Rail", 
+         month == "2024-05", 
+         metro_area == "New York-Newark, NY-NJ-CT") %>%
+  summarize(Total_Trips = sum(UPT, na.rm = TRUE))
+print(nyc_subway_may_2024)
+```
+
+### Ridership in April 2019
+
+```{r}
+nyc_subway_april_2019 <- USAGE %>%
+  filter(Mode == "Heavy Rail", 
+         month == "2019-04", 
+         metro_area == "New York-Newark, NY-NJ-CT") %>%
+  summarize(Total_Trips_2019 = sum(UPT, na.rm = TRUE))
+```
+
+### Ridership in April 2020
+
+```{r}
+nyc_subway_april_2020 <- USAGE %>%
+  filter(Mode == "Heavy Rail", 
+         month == "2020-04", 
+         metro_area == "New York-Newark, NY-NJ-CT") %>%
+  summarize(Total_Trips_2020 = sum(UPT, na.rm = TRUE))
+```
+
+### Calculate the drop in ridership
+
+```{r}
+ridership_fall <- nyc_subway_april_2019$Total_Trips_2019 - nyc_subway_april_2020$Total_Trips_2020
+print(paste("Ridership fall between April 2019 and April 2020:", ridership_fall))
+```
+
+### Create the USAGE_2022_ANNUAL table for 2022
+
+```{r}
+
+USAGE_2022_ANNUAL <- USAGE %>%
+  mutate(month = as.Date(paste0(month, "-01"), format = "%Y-%m-%d")) %>%  
+  mutate(year = year(month)) %>%
+  filter(year == 2022) %>%
+  group_by(`NTD ID`, Agency, metro_area, Mode) %>%
+  summarize(
+    UPT = sum(UPT, na.rm = TRUE),
+    VRM = sum(VRM, na.rm = TRUE)
+  ) %>%
+  ungroup()
+
+```
+
+### Combine USAGE_2022_ANNUAL with FINANCIALS
+
+```{r}
+USAGE_AND_FINANCIALS <- left_join(USAGE_2022_ANNUAL, 
+                                   FINANCIALS, 
+                                   by = c("NTD ID", "Mode")) %>%  
+                                   drop_na()  
+print(USAGE_AND_FINANCIALS)
+```
+
+### Farebox Recovery Among Major Systems
+
+```{r}
+most_upt <- USAGE_2022_ANNUAL %>%
+  group_by(Agency, Mode) %>%
+  summarize(Total_UPT = sum(UPT, na.rm = TRUE)) %>%
+  ungroup() %>%
+  filter(Total_UPT == max(Total_UPT, na.rm = TRUE))
+print(most_upt)
+```
