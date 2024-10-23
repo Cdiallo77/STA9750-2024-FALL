@@ -1,0 +1,661 @@
+---
+title: "Mini-Project 2: The Business of Show Business "
+author: Cheick Amed Diallo
+---
+
+![](Show.jpeg){fig-align="center" width="618"}
+
+\[from EDGE MEDIA NETWORK.\]
+
+## Introduction
+
+Welcome to Mini-Project #02. In this project, you will play the role of a Hollywood development executive; that is, you are the executive in charge of coming up with new movie ideas. Historically, development executives would source the “life rights” necessary to make “based on a true story” movies, would secure production options on promising new novels, and would partner with owners of established intellectual property (IP) to develop movie adaptations. Recently, however, the development process has been criticized by Hollywood insiders and audiences alike for over-reliance on rote sequels. Our goal is to develop a set of data-driven ideas for new movies. Before doing so, however, we will dive into Hollywood history to identify key characteristics of successful movies, to identify successful filmmakers and actors, and to examine some of Hollywood’s most famous flops.
+
+## Data
+
+The following code will automatically download and load these files into R.
+
+```{r}
+options(warn = -1)
+```
+
+```{r}
+#|echo: true
+#|message: false
+#|warning: false
+
+
+get_imdb_file <- function(fname){
+    BASE_URL <- "https://datasets.imdbws.com/"
+    fname_ext <- paste0(fname, ".tsv.gz")
+    if(!file.exists(fname_ext)){
+        FILE_URL <- paste0(BASE_URL, fname_ext)
+        download.file(FILE_URL, destfile = fname_ext)
+    }
+    suppressWarnings({
+        as.data.frame(readr::read_tsv(fname_ext, lazy=FALSE, show_col_types = FALSE))
+    })
+}
+
+NAME_BASICS <- get_imdb_file("name.basics")
+
+
+```
+
+```{r}
+#|echo: true
+#|message: false
+#|warning: false
+
+TITLE_BASICS     <- get_imdb_file("title.basics")
+
+TITLE_EPISODES   <- get_imdb_file("title.episode")
+
+TITLE_RATINGS    <- get_imdb_file("title.ratings")
+
+TITLE_CREW       <- get_imdb_file("title.crew")
+
+TITLE_PRINCIPALS <- get_imdb_file("title.principals")
+```
+
+Down-selecting to get to a data set that we can analyze fluidly
+
+```{r}
+options(repos = "https://cran.rstudio.com/")
+```
+
+```{r}
+#|echo: true
+#|message: false
+#|warning: false
+
+install.packages("dplyr")
+install.packages("stringr")
+library(dplyr)
+library(stringr)
+library(ggplot2)
+NAME_BASICS <- NAME_BASICS |> 
+  filter(str_count(knownForTitles, ",") > 1)
+
+
+```
+
+Showing what the graph looks like
+
+```{r}
+
+TITLE_RATINGS |>
+  ggplot(aes(x=numVotes)) + 
+  geom_histogram(bins=30) +
+  xlab("Number of IMDB Ratings") + 
+  ylab("Number of Titles") + 
+  ggtitle("Majority of IMDB Titles Have Less than 100 Ratings") + 
+  theme_bw() + 
+  scale_x_log10(label=scales::comma) + 
+  scale_y_continuous(label=scales::comma)
+```
+
+let’s throw out any title with less than 100 ratings
+
+```{r}
+TITLE_RATINGS |>
+  pull(numVotes) |>
+  quantile()
+```
+
+Let's reduce the size of our data set
+
+```{r}
+TITLE_RATINGS <- TITLE_RATINGS |>
+  filter(numVotes >= 100)
+```
+
+Let's perform the same filtering on our other TITLE\_\* tables
+
+```{r}
+
+TITLE_BASICS <- TITLE_BASICS |>
+  semi_join(TITLE_RATINGS, 
+            join_by(tconst == tconst))
+
+TITLE_CREW <- TITLE_CREW |>
+  semi_join(TITLE_RATINGS, 
+            join_by(tconst == tconst))
+
+TITLE_EPISODES_1 <- TITLE_EPISODES |>
+  semi_join(TITLE_RATINGS, 
+            join_by(tconst == tconst))
+TITLE_EPISODES_2 <- TITLE_EPISODES |>
+  semi_join(TITLE_RATINGS, 
+            join_by(parentTconst == tconst))
+
+TITLE_EPISODES <- bind_rows(TITLE_EPISODES_1,
+                            TITLE_EPISODES_2) |>
+  distinct()
+
+TITLE_PRINCIPALS <- TITLE_PRINCIPALS |>
+  semi_join(TITLE_RATINGS, join_by(tconst == tconst))
+
+
+rm(TITLE_EPISODES_1)
+rm(TITLE_EPISODES_2)
+
+```
+
+At this point, we’ve filtered down our data significantly and are ready to begin analysis in earnest. Initial Exploration, At this point, let’s start examining our data more closely. We can clean the NAMES_BASIC command as follows:
+
+```{r}
+#|echo: true
+#|message: false
+#|warning: false
+NAME_BASICS <- NAME_BASICS |>
+  mutate(birthYear = as.numeric(birthYear),
+         deathYear = as.numeric(deathYear))
+```
+
+## TASK 1: Correct the types of the columns
+
+```{r}
+#|echo: true
+#|message: false
+#|warning: false
+TITLE_BASICS <- TITLE_BASICS |>
+  mutate(startYear = as.numeric(startYear),
+         endYear = as.numeric(endYear),
+         isAdult = as.logical(isAdult))
+```
+
+#### TITLE_RATINGS: Correcting averageRating and numVotes
+
+```{r}
+#|echo: true
+#|message: false
+#|warning: false
+TITLE_RATINGS <- TITLE_RATINGS |>
+  mutate(averageRating = as.numeric(averageRating),
+         numVotes = as.numeric(numVotes))
+```
+
+#### TITLE_EPISODES: Correcting seasonNumber and episodeNumber
+
+```{r}
+#|echo: true
+#|message: false
+#|warning: false
+TITLE_EPISODES <- TITLE_EPISODES |>
+  mutate(seasonNumber = as.numeric(seasonNumber),
+         episodeNumber = as.numeric(episodeNumber))
+```
+
+#### TITLE_PRINCIPALS: Correcting Category and job
+
+```{r}
+#|echo: true
+#|message: false
+#|warning: false
+TITLE_PRINCIPALS <- TITLE_PRINCIPALS |>
+  mutate(category = as.factor(category),
+         job = as.character(job))
+```
+
+A quick glance at the structure of your dataset, showing the column types and some sample values.
+
+```{r}
+glimpse(NAME_BASICS)
+```
+
+## TASK 2: Instructor-Provided Questions
+
+#### Question 1: How many movies are in our data set? How many TV series? How many TV episodes?
+
+```{r}
+Categories <- TITLE_BASICS |>
+  filter(titleType %in% c("movie", "tvSeries", "tvEpisode")) |>
+  group_by(titleType) |>
+  summarise(count = n())
+
+print(Categories)
+
+```
+
+The summary shows that we have **105,549 movies** in this dataset; **112,156 Tv Episodes** and **22,074 Tv Series**.
+
+#### Question 2: Who is the oldest living person in our data set?
+
+```{r}
+
+oldest_living_person <- NAME_BASICS |>
+  filter(is.na(deathYear)) |>
+  filter(!is.na(birthYear)) |>
+  arrange(birthYear) |>
+  slice(1)
+
+print(oldest_living_person)
+
+```
+
+The data shows that **Richard Dybeck** is the oldest person from the our dataset. However, after researching online, this does not seems accurate; therefore, by tweeking the code we have other findings.
+
+```{r}
+oldest <- NAME_BASICS |>
+  filter(birthYear > 1923, is.na(deathYear))|> 
+  arrange (birthYear) |>
+  slice_head(n=10)
+print (oldest)
+```
+
+We now know that **Eva Marie Saint** is the oldest living movie star - matching our online finding.
+
+#### Question 3-a: There is one TV Episode in this data set with a perfect 10/10 rating and at least 200,000 IMDb ratings.
+
+```{r}
+
+perfect_rating <- TITLE_RATINGS |>
+  filter(averageRating == 10, numVotes >= 200000) |>
+  inner_join(TITLE_EPISODES, by = "tconst") |>
+  inner_join(TITLE_BASICS, by = "tconst") |>  
+  select(tconst, primaryTitle, parentTconst)  
+print(perfect_rating)
+
+```
+
+#### Question 3-b: What is it?
+
+```{r}
+series <- TITLE_BASICS |>
+  filter(tconst %in% perfect_rating$parentTconst) |>
+  select(tconst, primaryTitle)
+print(series)
+```
+
+**Ozymandias** had the perfect rating from **Breaking Bad**
+
+#### Question 4: What four projects is the actor Mark Hamill most known for?
+
+```{r}
+mark_hamill <- NAME_BASICS |>
+  filter(primaryName == "Mark Hamill") |>
+  select(nconst, knownForTitles)
+known_titles <- strsplit(mark_hamill$knownForTitles, ",")[[1]]
+mark_hamill_4projects <- TITLE_BASICS |>
+  filter(tconst %in% known_titles)
+print(mark_hamill_4projects)
+```
+
+**Mark Hamill** played in Star Wars Episode 4,5,6 and 8.
+
+#### Question 5: The TV series with \> 12 Episodes with the highest average ratings.
+
+```{r}
+
+highest_rated_series <- TITLE_EPISODES |>
+  group_by(parentTconst) |>
+  summarise(numEpisodes = n()) |>
+  filter(numEpisodes > 12) |>
+  inner_join(TITLE_RATINGS, by = c("parentTconst" = "tconst")) |>
+  group_by(parentTconst) |>
+  summarise(averageRating = mean(averageRating, na.rm = TRUE), numEpisodes = first(numEpisodes)) |>
+  arrange(desc(averageRating)) |>
+  inner_join(TITLE_BASICS, by = c("parentTconst" = "tconst")) |>
+  slice(1) |>
+  select(primaryTitle, averageRating, numEpisodes)
+print(highest_rated_series)
+
+```
+
+**Craft Games** has the highest average rating.
+
+#### Question 6: Is it true that episodes from later seasons of "*Happy Days*" have lower average ratings than the early seasons?
+
+```{r}
+happy_days_season_ratings <- TITLE_EPISODES |>
+  filter(parentTconst == (TITLE_BASICS |>
+                            filter(primaryTitle == "Happy Days", startYear == "1974") |>
+                            pull(tconst))) |>
+  inner_join(TITLE_RATINGS, by = "tconst") |>
+  group_by(seasonNumber) |>
+  summarise(averageSeasonRating = mean(averageRating, na.rm = TRUE))
+
+print(happy_days_season_ratings)
+
+```
+
+Yes, the common idiom *“jump the shark”* is accurate in this case because the ratings have been down since the 5 season.
+
+## Task 3: Custom success metric
+
+```{r}
+TITLE_RATINGS <- TITLE_RATINGS |>
+  mutate(success_score = 0.7 * averageRating + 0.3 * log10(numVotes))
+top_movies <- TITLE_RATINGS |>
+  arrange(desc(success_score)) |>
+  slice(1:10) |>
+  inner_join(TITLE_BASICS, by = "tconst") |>
+  filter(titleType == "movie") |>
+  select(primaryTitle, success_score, averageRating, numVotes)
+
+print(top_movies)
+```
+
+```{r}
+poor_movies <- TITLE_RATINGS |>
+  filter(numVotes > 100000) |>
+  arrange(success_score) |>
+  slice(1:5) |>
+  inner_join(TITLE_BASICS, by = "tconst") |>
+  select(primaryTitle, success_score, averageRating, numVotes)
+
+print(poor_movies)
+```
+
+```{r}
+mark_hamill_known <- NAME_BASICS |>
+  filter(primaryName == "Mark Hamill") |>
+  pull(knownForTitles) |>
+  str_split(",") |>
+  unlist()
+
+mark_hamill_projects <- TITLE_BASICS |>
+  filter(tconst %in% mark_hamill_known) |>
+  inner_join(TITLE_RATINGS, by = "tconst") |>
+  select(primaryTitle, success_score, averageRating, numVotes)
+
+print(mark_hamill_projects)
+```
+
+#### Additional spot check (movies with at least 50,000 votes and a high success score)
+
+```{r}
+
+successful_movies <- TITLE_RATINGS |>
+  filter(numVotes > 50000 & success_score > 8) |>
+  inner_join(TITLE_BASICS, by = "tconst") |>
+  select(primaryTitle, success_score, averageRating, numVotes)
+  head(successful_movies,5)
+
+```
+
+A success score \> 8 might be used as a threshold for determining that a project is a "solid" success, balancing both rating and popular awareness.
+
+Choosing top 5-10 movies by success metric:
+
+```{r}
+TITLE_RATINGS <- TITLE_RATINGS |>
+  mutate(success = averageRating * log10(numVotes + 1))  # Add +1 to avoid log(0)
+top_movies <- TITLE_RATINGS |>
+  filter(averageRating >= 8, numVotes >= 10000) |>
+  arrange(desc(success)) |>
+  slice(1:10) |>
+  inner_join(TITLE_BASICS, by = "tconst") |>
+  select(primaryTitle, averageRating, numVotes, success)
+
+```
+
+Checking and displaying for low-quality movies with many votes:
+
+```{r}
+low_quality_movies <- TITLE_RATINGS |>
+  filter(averageRating < 5, numVotes >= 50000) |>
+  arrange(success) |>
+  slice(1:5) |>
+  inner_join(TITLE_BASICS, by = "tconst") |>
+  select(primaryTitle, averageRating, numVotes, success)
+print(low_quality_movies)
+```
+
+```{r}
+nolan_titles <- NAME_BASICS |>
+  filter(primaryName == "Christopher Nolan") |>
+  select(knownForTitles) |>
+  pull(knownForTitles) |>
+  str_split(",") |>
+  unlist()
+
+nolan_movies <- TITLE_RATINGS |>
+  filter(tconst %in% nolan_titles) |>
+  inner_join(TITLE_BASICS, by = "tconst") |>
+  select(primaryTitle, averageRating, numVotes, success) |>
+  arrange(desc(success))
+print(nolan_movies)
+```
+
+Defining a success threshold (e.g., movies with success score above a certain value are "solid")
+
+```{r}
+threshold <- 6  
+solid_movies <- TITLE_RATINGS |>
+  filter(success >= threshold) |>
+  inner_join(TITLE_BASICS, by = "tconst") |>
+  select(primaryTitle, averageRating, numVotes, success)
+  head(solid_movies,5)
+
+```
+
+## Task 4: Trends in Success Over Time
+
+#### Question 1: What was the genre with the most “successes” in each decade ?
+
+```{r}
+movies_by_decade <- TITLE_BASICS %>%
+  mutate(startYear = as.numeric(startYear),
+         decade = (startYear %/% 10) * 10) %>%
+  filter(titleType == "movie")
+
+movies_success <- movies_by_decade %>%
+  inner_join(TITLE_RATINGS, by = "tconst") %>%
+  mutate(success = averageRating * log10(numVotes + 1))
+
+genre_success_by_decade <- movies_success %>%
+  group_by(decade, genres) %>%
+  summarise(numSuccesses = sum(success >= 6), .groups = 'drop')
+
+top_genres_by_decade <- genre_success_by_decade %>%
+  group_by(decade) %>%
+  top_n(5, numSuccesses) %>%
+  ungroup()
+```
+
+#### Plot the number of successes by genre in each decade (shows only the top 5) :
+
+```{r}
+#|echo: true
+#|message: false
+#|warning: false
+ggplot(top_genres_by_decade, aes(x = decade, y = numSuccesses, fill = genres)) +
+  geom_bar(stat = "identity") +  
+  labs(title = "Top 5 Genre Successes by Decade",
+       x = "Decade",
+       y = "Number of Successes",
+       fill = "Genres") +
+  theme_minimal() +
+  theme(legend.position = "bottom") +  
+  scale_fill_brewer(palette = "Paired")  
+
+```
+
+Comedy and Drama has been a dominant and successive genre troughout the decades.
+
+#### Question 2: What genre consistently has the most “successes” ?
+
+```{r}
+total_genre_success <- movies_success %>%
+  group_by(genres) %>%
+  summarise(totalSuccesses = sum(success >= 6), .groups = 'drop')
+top_genres <- total_genre_success %>%
+  top_n(5, totalSuccesses)
+ggplot(top_genres, aes(x = reorder(genres, -totalSuccesses), y = totalSuccesses, fill = genres)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Top 5 Genres by Total Number of Successes",
+       x = "Genre",
+       y = "Number of Successes",
+       fill = "Genres") +
+  coord_flip() +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  scale_fill_brewer(palette = "Paired") 
+
+```
+
+The genre that consistently has the most “successes” is **DRAMA**.
+
+#### Question 3: What genre used to reliably produce “successes” and has fallen out of favor?
+
+```{r}
+top_genres_overall <- movies_success %>%
+  group_by(genres) %>%
+  summarise(totalSuccesses = sum(success >= 6), .groups = 'drop') %>%
+  top_n(5, totalSuccesses)
+filtered_genre_success <- genre_success_by_decade %>%
+  filter(genres %in% top_genres_overall$genres)
+```
+
+#### Plot of the number of successes by genre across decades :
+
+```{r}
+ggplot(filtered_genre_success, aes(x = decade, y = numSuccesses, color = genres, group = genres)) +
+  geom_line(size = 1) + 
+  labs(title = "Top 5 Genre Trends: Successes Over Decades",
+       x = "Decade",
+       y = "Number of Successes",
+       color = "Genres") +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  scale_color_brewer(palette = "Paired")  
+```
+
+#### What genre has produced the most “successes” since 2010 ?
+
+```{r}
+success_since_2010 <- movies_success %>%
+  filter(startYear >= 2010) %>%
+  group_by(genres) %>%
+  summarise(numSuccesses = sum(success >= 6), totalMovies = n(), .groups = 'drop')
+top_genres_since_2010 <- success_since_2010 %>%
+  top_n(5, numSuccesses)
+```
+
+#### Plot the number of successes since 2010 :
+
+```{r}
+ggplot(top_genres_since_2010, aes(x = reorder(genres, -numSuccesses), y = numSuccesses, fill = genres)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Top 5 Genres by Number of Successes Since 2010",
+       x = "Genre",
+       y = "Number of Successes",
+       fill = "Genres") +
+  coord_flip() +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  scale_fill_brewer(palette = "Paired") 
+```
+
+**"Drama"** genre has been the most successful since 2010.
+
+#### Question 4: What genre has become more popular in recent years(including only top 5 genres) ?
+
+```{r}
+
+recent_genre_success <- movies_success %>%
+  filter(startYear >= 2000) %>%
+  group_by(startYear, genres) %>%
+  summarise(numSuccesses = sum(success >= 6), .groups = 'drop')
+
+top_genres_overall <- movies_success %>%
+  group_by(genres) %>%
+  summarise(totalSuccesses = sum(success >= 6), .groups = 'drop') %>%
+  top_n(5, totalSuccesses)
+
+filtered_recent_success <- recent_genre_success %>%
+  filter(genres %in% top_genres_overall$genres)
+
+ggplot(filtered_recent_success, aes(x = startYear, y = numSuccesses, color = genres, group = genres)) +
+  geom_line(size = 1) +
+  labs(title = "Top 5 Genre Popularity Trends Since 2000",
+       x = "Year",
+       y = "Number of Successes",
+       color = "Genres") +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  scale_color_brewer(palette = "Paired")
+
+
+```
+
+## Task 5: Key Personnel
+
+For my Project Pitch, in am selecting the succesful duo **Jordan Peele & Keegan-Michael Key**, bringing together the dynamic, Emmy-winning duo that dominated the sketch comedy world with Key & Peele. Both have proven they can nail comedic timing and tackle socially relevant themes. They are familiar with each other's rhythm, which guarantees on-screen chemistry and laugh-out-loud moments. Jordan Peele is known for: "Key & Peele", "Get Out". He is a master of sketch comedy with an incredible ability to weave humor into smart commentary. While, Keegan-Michael Key is also known for "Key & Peele", "The Lion King", "Friends from College". His energetic style and ability to play a variety of roles make him versatile for any comic scenario.
+
+```{r}
+data <- data.frame(
+  project = c("Key & Peele", "Keanu", "The Substitute", "Toy Story 4", "Get Out (Peele Dir.)"),
+  imdb_rating = c(8.3, 6.3, 7.8, 7.7, 7.7),
+  imdb_votes = c(50000, 55000, 2000, 240000, 700000)
+)
+```
+
+#### Plotting IMDb rating vs IMDb votes for Peele & Key projects
+
+```{r}
+ggplot(data, aes(x = imdb_votes, y = imdb_rating, label = project)) +
+  geom_point(color = "blue", size = 4) +
+  geom_text(vjust = -1, hjust = 1, size = 3) +  
+  scale_x_log10() +
+  labs(
+    title = "Peele & Key Projects: IMDb Ratings vs. Votes",
+    x = "IMDb Votes",
+    y = "IMDb Rating"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5), 
+    axis.title = element_text(size = 12),
+    axis.text = element_text(size = 10)
+  )
+
+```
+
+**Adam McKay** is the perfect choice to direct a comedy featuring *Jordan Peele* and *Keegan-Michael Key*. McKay boasts an impressive portfolio of both commercial hits and critically acclaimed films.From directing modern comedy classics like Anchorman, Step Brothers, and The Other Guys, to masterfully blending humor with incisive social commentary in The Big Short and Don’t Look Up, McKay's versatile talent is undeniable. His unique ability to mix humor with thought-provoking themes aligns perfectly with Peele and Key's comedic style. Furthermore, McKay’s track record of financial and critical success makes him a reliable choice for a commercially viable project.
+
+```{r}
+mckay_data <- data.frame(
+  movie = c("Anchorman", "Step Brothers", "The Big Short", "Vice", "Don't Look Up"),
+  imdb_rating = c(7.2, 6.9, 7.8, 7.2, 7.2),
+  imdb_votes = c(380000, 320000, 425000, 157000, 585000),
+  box_office = c(90, 128, 133, 76, 792)
+)
+```
+
+#### Plotting IMDb rating vs IMDb votes for McKay’s films:
+
+```{r}
+ggplot(mckay_data, aes(x = imdb_votes, y = imdb_rating, label = movie)) +
+  geom_point(color = "blue", size = 4) +
+  geom_text(vjust = 1.5, hjust = 0.5) +
+  scale_x_log10() +
+  labs(title = "Adam McKay's Comedy Success: IMDb Ratings vs. Votes", x = "IMDb Votes", y = "IMDb Rating") +
+  theme_minimal()
+```
+
+This graph highlights McKay's consistent ability to direct high-rating and high-vote comedy projects, making him a reliable choice for our comedy film starring Jordan Peele and Keegan-Michael Key to make this project a powerhouse in the comedy genre!
+
+## Task 6: Finding a Classic Movie to Remake
+
+For our comedy project starring Jordan Peele and Keegan-Michael Key, directed by Adam McKay, we’ve chosen the 1979 classic "The In-Laws" for several reasons. First, the original has a 7.3/10 rating from over 15,000 votes, showing its popularity. The story follows two soon-to-be in-laws caught in a wild CIA adventure. Their chemistry is spot-on for Peele and Key as this film is a mix of humor, action, and character-driven comedy makes it a great candidate for a modern remake with our talented cast.
+
+As for the original movie key actors, the Director Arthur Hiller, passed away in 2016). The actor Peter Falk who played the wacky CIA agent passed away in 2011. Also, Alan Arkin, who played straight-laced dentist passed away in 2023.
+
+A remake of "The In-Laws" with Jordan Peele, Keegan-Michael Key, and Adam McKay promises to be a fresh and hilarious take on respecting the classic while taking it to new comedic heights.
+
+## Task 7: Write and Deliver Your Pitch
+
+#### 2024 Remake "The In-Laws" 
+
+![](ProjectImage.webp){fig-align="center" width="435"}
+
+\[Image generated by AI.\]
+
+Get ready for a comedy masterpiece! **Jordan Peele** and **Keegan-Michael Key** star in the ultimate modern remake of the 1979 classic **"The In-Laws"**, directed by the sharp and witty **Adam McKay**. This hilarious action-comedy combines laugh-out-loud moments with thrilling international escapades. Peele, as the straight-laced family man, and Key, as the wild CIA agent, showcase their signature comedic chemistry in this updated take on a beloved story.
+
+The original The In-Laws scored a solid 7.3 IMDb rating and its blend of humor and action provides the perfect foundation for a fresh reboot. With Peele and Key’s proven comedy success and McKay’s expertise in blending satire and big action, this film is set to hit the mark both critically and commercially. McKay’s recent box office hits, like The Big Short and Don’t Look Up, show that audiences are craving smart, socially relevant comedy, making this the perfect project for our time.
+
+This remake promises a hilarious, fast-paced adventure that will appeal to both fans of the original and new audiences alike. Get ready for outrageous family drama, CIA plots, and wild chases across the globe in The In-Laws—coming soon to theaters.
